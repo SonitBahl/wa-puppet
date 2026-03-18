@@ -1,0 +1,24 @@
+# Python cache/artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Local virtual environments
+.venv/
+venv/
+env/
+
+# Bot runtime state
+.wa_seen_messages.json
+
+# Persistent browser session data (contains login/session info)
+.wa_session/
+.wa_session_alt/
+
+# Local rule overrides (keep rules.example.json in git)
+rules.json
+
+# OS/editor noise
+.DS_Store
+.vscode/
+.idea/

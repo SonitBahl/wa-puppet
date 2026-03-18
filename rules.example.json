@@ -1,0 +1,16 @@
+[
+  {
+    "chat_title": "Mom",
+    "action": "auto_reply",
+    "reply_text": "Hi, I received your message. I will reply soon.",
+    "contains": "urgent"
+  },
+  {
+    "sender_regex": ".*Support.*",
+    "action": "print"
+  },
+  {
+    "chat_title_contains": "Project",
+    "action": "print"
+  }
+]
