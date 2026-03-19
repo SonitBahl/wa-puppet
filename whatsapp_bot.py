@@ -197,10 +197,23 @@ class WhatsAppBot:
         await self.page.goto(WHATSAPP_URL)
         logging.info("Open WhatsApp Web and scan the QR code if asked.")
 
-        # This selector appears once the app shell is ready after login.
         await self.page.wait_for_selector("#app", timeout=0)
-        await asyncio.sleep(5)
-        logging.info("WhatsApp Web is loaded.")
+
+        while True:
+            try:
+                counts = await self._selector_counts()
+            except PlaywrightError:
+                # If the page is closing while we're waiting, let caller handle it.
+                raise
+
+            if any(counts.values()):
+                break
+
+            logging.info("Waiting for login (QR scan). Chat list not visible yet.")
+            await asyncio.sleep(2)
+
+        await asyncio.sleep(1)
+        logging.info("WhatsApp Web is ready (chat list detected).")
 
     async def _get_unread_chats(self) -> List[Dict[str, str]]:
         js = """
@@ -340,30 +353,30 @@ class WhatsAppBot:
                 chats.append({"title": title, "chat_id": chat_id if isinstance(chat_id, str) else ""})
         return chats
 
-        async def _selector_counts(self) -> Dict[str, int]:
-                js = """
-                () => {
-                    const selectors = [
-                        'div[role="listitem"]',
-                        'div[data-testid="cell-frame-container"]',
-                        'div[data-testid="chat-list-item"]',
-                        '[data-id][role="row"]',
-                    ];
-                    const counts = {};
-                    for (const s of selectors) {
-                        counts[s] = document.querySelectorAll(s).length;
-                    }
-                    return counts;
-                }
-                """
-                result = await self.page.evaluate(js)
-                if isinstance(result, dict):
-                        out: Dict[str, int] = {}
-                        for key, value in result.items():
-                                if isinstance(key, str) and isinstance(value, int):
-                                        out[key] = value
-                        return out
-                return {}
+    async def _selector_counts(self) -> Dict[str, int]:
+        js = """
+        () => {
+          const selectors = [
+            'div[role="listitem"]',
+            'div[data-testid="cell-frame-container"]',
+            'div[data-testid="chat-list-item"]',
+            '[data-id][role="row"]',
+          ];
+          const counts = {};
+          for (const s of selectors) {
+            counts[s] = document.querySelectorAll(s).length;
+          }
+          return counts;
+        }
+        """
+        result = await self.page.evaluate(js)
+        if isinstance(result, dict):
+            out: Dict[str, int] = {}
+            for key, value in result.items():
+                if isinstance(key, str) and isinstance(value, int):
+                    out[key] = value
+            return out
+        return {}
 
     async def _extract_active_chat_title(self) -> str:
         js = """
@@ -378,54 +391,54 @@ class WhatsAppBot:
         title = await self.page.evaluate(js)
         return title.strip() if isinstance(title, str) else ""
 
-        async def _open_chat_by_title(self, title: str) -> bool:
-                clicked = await self.page.evaluate(
-                        """
-                        (wantedTitle) => {
-                            const rowSelectors = [
-                                'div[role="listitem"]',
-                                'div[data-testid="cell-frame-container"]',
-                                'div[data-testid="chat-list-item"]',
-                                '[data-id][role="row"]'
-                            ];
+    async def _open_chat_by_title(self, title: str) -> bool:
+        clicked = await self.page.evaluate(
+            """
+            (wantedTitle) => {
+              const rowSelectors = [
+                'div[role="listitem"]',
+                'div[data-testid="cell-frame-container"]',
+                'div[data-testid="chat-list-item"]',
+                '[data-id][role="row"]'
+              ];
 
-                            const rows = [];
-                            const seen = new Set();
-                            for (const selector of rowSelectors) {
-                                for (const row of Array.from(document.querySelectorAll(selector))) {
-                                    if (seen.has(row)) continue;
-                                    seen.add(row);
-                                    rows.push(row);
-                                }
-                            }
+              const rows = [];
+              const seen = new Set();
+              for (const selector of rowSelectors) {
+                for (const row of Array.from(document.querySelectorAll(selector))) {
+                  if (seen.has(row)) continue;
+                  seen.add(row);
+                  rows.push(row);
+                }
+              }
 
-                            const getTitle = (row) => {
-                                const titleEl = row.querySelector('span[title]');
-                                if (titleEl) return titleEl.getAttribute('title') || '';
-                                const textEl = row.querySelector('span[dir="auto"], div[dir="auto"] span, [title]');
-                                if (textEl) {
-                                    const t = textEl.getAttribute('title') || textEl.textContent || '';
-                                    return (t || '').trim();
-                                }
-                                const aria = row.getAttribute('aria-label') || '';
-                                if (aria) return aria.split(',')[0].trim();
-                                return '';
-                            };
+              const getTitle = (row) => {
+                const titleEl = row.querySelector('span[title]');
+                if (titleEl) return titleEl.getAttribute('title') || '';
+                const textEl = row.querySelector('span[dir="auto"], div[dir="auto"] span, [title]');
+                if (textEl) {
+                  const t = textEl.getAttribute('title') || textEl.textContent || '';
+                  return (t || '').trim();
+                }
+                const aria = row.getAttribute('aria-label') || '';
+                if (aria) return aria.split(',')[0].trim();
+                return '';
+              };
 
-                            for (const row of rows) {
-                                if (getTitle(row) !== wantedTitle) continue;
-                                row.click();
-                                return true;
-                            }
-                            return false;
-                        }
-                        """,
-                        title,
-                )
-                if not clicked:
-                        return False
-                await asyncio.sleep(1)
-                return True
+              for (const row of rows) {
+                if (getTitle(row) !== wantedTitle) continue;
+                row.click();
+                return true;
+              }
+              return false;
+            }
+            """,
+            title,
+        )
+        if not clicked:
+            return False
+        await asyncio.sleep(1)
+        return True
 
     async def _extract_sender_from_header(self) -> str:
         js = """
@@ -538,6 +551,12 @@ class WhatsAppBot:
         while True:
             try:
                 await self.process_once()
+            except PlaywrightError as exc:
+                msg = str(exc)
+                if "Target page, context or browser has been closed" in msg:
+                    logging.error("Browser was closed; stopping bot loop.")
+                    return
+                logging.exception("Playwright error while processing messages")
             except Exception:
                 logging.exception("Error while processing messages")
             await asyncio.sleep(self.poll_seconds)
